@@ -479,6 +479,73 @@ export function hyperlink(text: string, url: string): string {
 	return `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\`;
 }
 
+/**
+ * Cell-art image rendering for the OpenTUI engine.
+ *
+ * OpenTUI owns the whole alternate screen and cannot pass terminal-graphics
+ * escapes (kitty/iTerm2) through to the outer terminal. When the OpenTUI surface
+ * enables cell-art mode, the `Image` component emits a lightweight APC marker
+ * (carrying an id and the target cell rect) instead of a graphics sequence, and
+ * registers its source bytes here. The surface looks the bytes up by id, decodes
+ * them to RGBA, and paints half-block cell art via the native supersample buffer.
+ *
+ * `extractAnsiCode` consumes APC sequences, so the marker has zero visible width
+ * and is harmlessly dropped on any path that does not special-case it.
+ */
+let cellArtMode = false;
+
+export function setCellArtMode(enabled: boolean): void {
+	cellArtMode = enabled;
+}
+
+export function isCellArtMode(): boolean {
+	return cellArtMode;
+}
+
+export interface CellImageSource {
+	base64Data: string;
+	mimeType: string;
+}
+
+const cellImages = new Map<number, CellImageSource>();
+
+export function registerCellImage(id: number, source: CellImageSource): void {
+	cellImages.set(id, source);
+}
+
+export function getCellImage(id: number): CellImageSource | undefined {
+	return cellImages.get(id);
+}
+
+/** Clear all registered cell-art image payloads. */
+export function clearCellImages(): void {
+	cellImages.clear();
+}
+
+const CELL_IMAGE_PREFIX = "\x1b_R";
+const CELL_IMAGE_RE = /^\x1b_R(\d+);(\d+);(\d+);(\d+)\x07$/;
+
+export interface CellImageMarker {
+	id: number;
+	columns: number;
+	rows: number;
+	/** Which source cell-row this line represents (0-based), so a partially scrolled image still paints its visible rows. */
+	row: number;
+}
+
+/** Encode one cell-art image row as an APC marker line: `ESC _ R id;cols;rows;row BEL`. */
+export function encodeCellImageMarker(id: number, columns: number, rows: number, row: number): string {
+	return `${CELL_IMAGE_PREFIX}${id};${columns};${rows};${row}\x07`;
+}
+
+/** Parse a cell-art marker line (the whole line must be the marker), or null. */
+export function parseCellImageMarker(line: string): CellImageMarker | null {
+	if (!line.startsWith(CELL_IMAGE_PREFIX)) return null;
+	const match = CELL_IMAGE_RE.exec(line);
+	if (!match) return null;
+	return { id: Number(match[1]), columns: Number(match[2]), rows: Number(match[3]), row: Number(match[4]) };
+}
+
 export function imageFallback(mimeType: string, dimensions?: ImageDimensions, filename?: string): string {
 	const parts: string[] = [];
 	if (filename) parts.push(filename);

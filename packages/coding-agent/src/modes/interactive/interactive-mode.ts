@@ -27,6 +27,7 @@ import type {
 	OverlayHandle,
 	OverlayOptions,
 	SlashCommand,
+	UiSurface,
 } from "@earendil-works/pi-tui";
 import {
 	CombinedAutocompleteProvider,
@@ -40,6 +41,7 @@ import {
 	ProcessTerminal,
 	Spacer,
 	setKeybindings,
+	type Terminal,
 	Text,
 	TruncatedText,
 	TUI,
@@ -94,6 +96,7 @@ import type { SourceInfo } from "../../core/source-info.ts";
 import { isInstallTelemetryEnabled } from "../../core/telemetry.ts";
 import type { TruncationResult } from "../../core/tools/truncate.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../../core/trust-manager.ts";
+import { decodeImageToRgba } from "../../utils/cell-image-decoder.ts";
 import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelog } from "../../utils/changelog.ts";
 import { copyToClipboard } from "../../utils/clipboard.ts";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
@@ -337,6 +340,15 @@ export interface InteractiveModeOptions {
 	initialMessages?: string[];
 	/** Force verbose startup (overrides quietStartup setting) */
 	verbose?: boolean;
+	/**
+	 * Alternate UI engine constructor (e.g. OpenTuiSurface). Defaults to the legacy
+	 * inline TUI. Lazily resolved by the caller so the OpenTUI native core is only
+	 * loaded when `PI_TUI_ENGINE=opentui`. Must extend TUI (the shared surface).
+	 */
+	tuiEngineClass?: new (
+		terminal: Terminal,
+		showHardwareCursor?: boolean,
+	) => TUI;
 }
 
 export class InteractiveMode {
@@ -475,8 +487,25 @@ export class InteractiveMode {
 			await this.rebindCurrentSession({ renderBeforeBind: true });
 		});
 		this.version = VERSION;
-		this.ui = new TUI(new ProcessTerminal(), this.settingsManager.getShowHardwareCursor());
+		const UiEngine = this.options.tuiEngineClass ?? TUI;
+		this.ui = new UiEngine(new ProcessTerminal(), this.settingsManager.getShowHardwareCursor());
 		this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
+		// The full-screen engine owns the cell grid and renders images as cell art;
+		// supply the photon-backed decoder (a no-op on the legacy inline engine).
+		(this.ui as UiSurface).setImageDecoder?.(decodeImageToRgba);
+		// Engines that capture the mouse re-implement drag selection; wire
+		// completed selections to the host clipboard helper.
+		(this.ui as UiSurface).setClipboardWriter?.((text) => {
+			copyToClipboard(text).then(
+				() => this.showStatus("Copied selection to clipboard"),
+				(error: unknown) => this.showError(error instanceof Error ? error.message : String(error)),
+			);
+		});
+		(this.ui as UiSurface).setSelectionReadyHandler?.(() => {
+			this.showStatus(
+				`Selection ready — ${keyText("tui.input.copy")} to copy, ${keyText("tui.select.cancel")} to clear`,
+			);
+		});
 		this.headerContainer = new Container();
 		this.loadedResourcesContainer = new Container();
 		this.chatContainer = new Container();
@@ -736,6 +765,11 @@ export class InteractiveMode {
 		this.ui.addChild(this.editorContainer);
 		this.ui.addChild(this.widgetContainerBelow);
 		this.ui.addChild(this.footer);
+		// Full-screen engines (OpenTuiSurface) lay these out as pinned regions: header
+		// at the top, the conversation scrollable in the middle, and everything else
+		// (status/widgets/editor/footer) pinned to the bottom. The inline TUI ignores
+		// this and stacks children top-to-bottom as before.
+		(this.ui as UiSurface).setRegions?.([this.headerContainer], [this.chatContainer, this.pendingMessagesContainer]);
 		this.ui.setFocus(this.editor);
 
 		this.setupKeyHandlers();

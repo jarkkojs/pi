@@ -16,6 +16,7 @@ import {
 	type TerminalColorScheme,
 } from "./terminal-colors.ts";
 import { deleteKittyImage, getCapabilities, isImageLine, setCellDimensions } from "./terminal-image.ts";
+import type { UiSurface } from "./ui-surface.ts";
 import { extractSegments, normalizeTerminalOutput, sliceByColumn, sliceWithWidth, visibleWidth } from "./utils.ts";
 
 const KITTY_SEQUENCE_PREFIX = "\x1b_G";
@@ -87,8 +88,8 @@ export interface Component {
 	invalidate(): void;
 }
 
-type InputListenerResult = { consume?: boolean; data?: string } | undefined;
-type InputListener = (data: string) => InputListenerResult;
+export type InputListenerResult = { consume?: boolean; data?: string } | undefined;
+export type InputListener = (data: string) => InputListenerResult;
 type PendingOsc11BackgroundQuery = {
 	settled: boolean;
 	resolve: ((rgb: RgbColor | undefined) => void) | undefined;
@@ -292,7 +293,7 @@ export class Container implements Component {
 /**
  * TUI - Main class for managing terminal UI with differential rendering
  */
-export class TUI extends Container {
+export class TUI extends Container implements UiSurface {
 	public terminal: Terminal;
 	private previousLines: string[] = [];
 	private previousKittyImageIds = new Set<number>();
@@ -319,7 +320,6 @@ export class TUI extends Container {
 	private pendingOsc11BackgroundQueries: PendingOsc11BackgroundQuery[] = [];
 	private terminalColorSchemeListeners = new Set<(scheme: TerminalColorScheme) => void>();
 	private terminalColorSchemeNotificationsEnabled = false;
-
 	// Overlay stack for modal components rendered on top of base content
 	private focusOrderCounter = 0;
 	private overlayStack: OverlayStackEntry[] = [];
@@ -758,7 +758,7 @@ export class TUI extends Container {
 		}, delay);
 	}
 
-	private handleInput(data: string): void {
+	protected handleInput(data: string): void {
 		if (this.consumeOsc11BackgroundResponse(data)) {
 			return;
 		}
@@ -1251,7 +1251,38 @@ export class TUI extends Container {
 		return null;
 	}
 
-	private doRender(): void {
+	/**
+	 * Compose the final frame: base component lines with overlays composited on top,
+	 * and the hardware cursor position extracted (CURSOR_MARKER stripped from the lines).
+	 * Output-agnostic and shared with alternate engines (e.g. OpenTuiSurface); the inline
+	 * renderer applies its own per-line ANSI resets afterward, so this does not.
+	 */
+	protected composeFrame(
+		width: number,
+		height: number,
+	): { lines: string[]; cursor: { row: number; col: number } | null } {
+		return this.composeFrameFrom(this.render(width), width, height);
+	}
+
+	/**
+	 * Like `composeFrame`, but over caller-supplied base lines instead of the flat
+	 * child render. Lets an alternate engine assemble its own layout (e.g. pinned
+	 * regions) and still reuse overlay compositing + cursor extraction verbatim.
+	 */
+	protected composeFrameFrom(
+		baseLines: string[],
+		width: number,
+		height: number,
+	): { lines: string[]; cursor: { row: number; col: number } | null } {
+		let lines = baseLines;
+		if (this.overlayStack.length > 0) {
+			lines = this.compositeOverlays(lines, width, height);
+		}
+		const cursor = this.extractCursorPosition(lines, height);
+		return { lines, cursor };
+	}
+
+	protected doRender(): void {
 		if (this.stopped) return;
 		const width = this.terminal.columns;
 		const height = this.terminal.rows;
@@ -1267,16 +1298,10 @@ export class TUI extends Container {
 			return targetScreenRow - currentScreenRow;
 		};
 
-		// Render all components to get new lines
-		let newLines = this.render(width);
-
-		// Composite overlays into the rendered lines (before differential compare)
-		if (this.overlayStack.length > 0) {
-			newLines = this.compositeOverlays(newLines, width, height);
-		}
-
-		// Extract cursor position before applying line resets (marker must be found first)
-		const cursorPos = this.extractCursorPosition(newLines, height);
+		// Compose the frame (base lines + overlays, with the cursor marker extracted).
+		const composed = this.composeFrame(width, height);
+		let newLines = composed.lines;
+		const cursorPos = composed.cursor;
 
 		newLines = this.applyLineResets(newLines);
 

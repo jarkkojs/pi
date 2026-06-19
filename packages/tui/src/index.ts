@@ -101,6 +101,8 @@ export {
 	Container,
 	CURSOR_MARKER,
 	type Focusable,
+	type InputListener,
+	type InputListenerResult,
 	isFocusable,
 	type OverlayAnchor,
 	type OverlayHandle,
@@ -110,5 +112,6 @@ export {
 	type SizeValue,
 	TUI,
 } from "./tui.ts";
+export type { CellImageDecoder, UiSurface } from "./ui-surface.ts";
 // Utilities
 export { sliceByColumn, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "./utils.ts";

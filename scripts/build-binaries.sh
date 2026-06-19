@@ -91,8 +91,12 @@ fi
 if [[ "$SKIP_DEPS" == "false" ]]; then
     echo "==> Installing cross-platform native bindings..."
     CLIPBOARD_VERSION=$(node -p "require('./packages/coding-agent/package.json').optionalDependencies['@mariozechner/clipboard']")
+    OPENTUI_VERSION=$(node -p "require('./packages/tui/package.json').dependencies['@opentui/core']")
     # npm ci only installs optional deps for the current platform
-    # We need the base clipboard package and all platform bindings for bun cross-compilation
+    # We need the base clipboard package and all platform bindings for bun cross-compilation,
+    # plus every @opentui/core-<platform> prebuilt: bun --compile statically resolves each
+    # dynamic import("@opentui/core-<plat>") branch in resolveNativePackage(), and each
+    # package's index.bun.js embeds its libopentui.so into bunfs (no copy-alongside needed).
     # Use --force to bypass platform checks (os/cpu restrictions in package.json)
     # Install all in one command to avoid npm removing packages from previous installs
     npm install --include=optional --no-save --package-lock=false --force --ignore-scripts \
@@ -102,7 +106,15 @@ if [[ "$SKIP_DEPS" == "false" ]]; then
         @mariozechner/clipboard-linux-x64-gnu@"$CLIPBOARD_VERSION" \
         @mariozechner/clipboard-linux-arm64-gnu@"$CLIPBOARD_VERSION" \
         @mariozechner/clipboard-win32-x64-msvc@"$CLIPBOARD_VERSION" \
-        @mariozechner/clipboard-win32-arm64-msvc@"$CLIPBOARD_VERSION"
+        @mariozechner/clipboard-win32-arm64-msvc@"$CLIPBOARD_VERSION" \
+        @opentui/core-darwin-arm64@"$OPENTUI_VERSION" \
+        @opentui/core-darwin-x64@"$OPENTUI_VERSION" \
+        @opentui/core-linux-x64@"$OPENTUI_VERSION" \
+        @opentui/core-linux-arm64@"$OPENTUI_VERSION" \
+        @opentui/core-linux-x64-musl@"$OPENTUI_VERSION" \
+        @opentui/core-linux-arm64-musl@"$OPENTUI_VERSION" \
+        @opentui/core-win32-x64@"$OPENTUI_VERSION" \
+        @opentui/core-win32-arm64@"$OPENTUI_VERSION"
 else
     echo "==> Skipping cross-platform native bindings (--skip-deps)"
 fi

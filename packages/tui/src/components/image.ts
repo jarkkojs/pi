@@ -1,10 +1,14 @@
 import {
 	allocateImageId,
+	calculateImageCellSize,
+	encodeCellImageMarker,
 	getCapabilities,
 	getCellDimensions,
 	getImageDimensions,
 	type ImageDimensions,
 	imageFallback,
+	isCellArtMode,
+	registerCellImage,
 	renderImage,
 } from "../terminal-image.ts";
 import type { Component } from "../tui.ts";
@@ -66,6 +70,25 @@ export class Image implements Component {
 		const cellDimensions = getCellDimensions();
 		const defaultMaxHeight = Math.max(1, Math.ceil((maxWidth * cellDimensions.widthPx) / cellDimensions.heightPx));
 		const maxHeight = this.options.maxHeightCells ?? defaultMaxHeight;
+
+		// Cell-art mode (OpenTUI engine): emit a marker the surface decodes to
+		// half-block art, reserving `rows` lines so layout accounts for its height.
+		if (isCellArtMode()) {
+			if (this.imageId === undefined) {
+				this.imageId = allocateImageId();
+			}
+			registerCellImage(this.imageId, { base64Data: this.base64Data, mimeType: this.mimeType });
+			const size = calculateImageCellSize(this.dimensions, maxWidth, maxHeight, cellDimensions);
+			// One marker line per row, each tagged with its source-row offset, so the
+			// surface can paint a partially scrolled image's visible rows individually.
+			const lines: string[] = [];
+			for (let row = 0; row < size.rows; row++) {
+				lines.push(encodeCellImageMarker(this.imageId, size.columns, size.rows, row));
+			}
+			this.cachedLines = lines;
+			this.cachedWidth = width;
+			return lines;
+		}
 
 		const caps = getCapabilities();
 		let lines: string[];

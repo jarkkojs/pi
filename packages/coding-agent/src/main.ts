@@ -812,6 +812,13 @@ export async function main(args: string[], options?: MainOptions) {
 		printTimings();
 		await runRpcMode(runtime);
 	} else if (appMode === "interactive") {
+		// Optional full-screen OpenTUI engine. Lazily imported so its native core
+		// (loaded via bun:ffi) is only pulled in when explicitly opted into.
+		let tuiEngineClass: typeof import("@earendil-works/pi-tui/opentui").OpenTuiSurface | undefined;
+		if (process.env.PI_TUI_ENGINE === "opentui") {
+			tuiEngineClass = (await import("@earendil-works/pi-tui/opentui")).OpenTuiSurface;
+		}
+
 		const interactiveMode = new InteractiveMode(runtime, {
 			migratedProviders,
 			modelFallbackMessage,
@@ -820,6 +827,7 @@ export async function main(args: string[], options?: MainOptions) {
 			initialImages,
 			initialMessages: parsed.messages,
 			verbose: parsed.verbose,
+			tuiEngineClass,
 		});
 		if (startupBenchmark) {
 			await interactiveMode.init();

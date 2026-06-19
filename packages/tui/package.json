@@ -4,10 +4,21 @@
 	"description": "Terminal User Interface library with differential rendering for efficient text-based applications",
 	"type": "module",
 	"main": "dist/index.js",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./opentui": {
+			"types": "./dist/opentui/surface.d.ts",
+			"import": "./dist/opentui/surface.js"
+		}
+	},
 	"scripts": {
 		"clean": "shx rm -rf dist",
 		"build": "tsgo -p tsconfig.build.json",
 		"test": "node --test --test-reporter=dot --test-reporter-destination=stdout test/*.test.ts",
+		"test:opentui": "bun test test/opentui",
 		"prepublishOnly": "npm run clean && npm run build"
 	},
 	"files": [
@@ -37,6 +48,7 @@
 	},
 	"types": "./dist/index.d.ts",
 	"dependencies": {
+		"@opentui/core": "0.4.1",
 		"get-east-asian-width": "1.6.0",
 		"marked": "18.0.5"
 	},
