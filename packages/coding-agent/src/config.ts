@@ -1,7 +1,8 @@
-import { accessSync, constants, existsSync, readFileSync, realpathSync } from "fs";
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { basename, dirname, join, resolve, sep, win32 } from "path";
 import { fileURLToPath } from "url";
+import { ASSET_HASH, EMBEDDED_ASSETS } from "./bun/embedded-assets.generated.ts";
 import { spawnProcessSync } from "./utils/child-process.ts";
 import { normalizePath } from "./utils/paths.ts";
 
@@ -358,9 +359,38 @@ export function getUpdateInstruction(packageName: string): string {
 // Package Asset Paths (shipped with executable)
 // =============================================================================
 
+let extractedBunAssetsDir: string | undefined;
+
+/**
+ * Bun binaries embed their assets (theme, docs, examples, wasm, ...) directly in the
+ * executable. Extract them once to a stable, content-addressed cache directory so the
+ * binary works regardless of where it's copied to.
+ */
+function getExtractedBunAssetsDir(): string {
+	if (extractedBunAssetsDir) {
+		return extractedBunAssetsDir;
+	}
+	if (!ASSET_HASH) {
+		// Binary compiled without the embedded manifest; fall back to the legacy layout.
+		return dirname(process.execPath);
+	}
+	const cacheDir = join(homedir(), ".cache", "pi", "bin-assets", ASSET_HASH);
+	const marker = join(cacheDir, ".complete");
+	if (!existsSync(marker)) {
+		for (const [relPath, embeddedPath] of Object.entries(EMBEDDED_ASSETS)) {
+			const target = join(cacheDir, relPath);
+			mkdirSync(dirname(target), { recursive: true });
+			writeFileSync(target, readFileSync(embeddedPath));
+		}
+		writeFileSync(marker, "");
+	}
+	extractedBunAssetsDir = cacheDir;
+	return cacheDir;
+}
+
 /**
  * Get the base directory for resolving package assets (themes, package.json, README.md, CHANGELOG.md).
- * - For Bun binary: returns the directory containing the executable
+ * - For Bun binary: returns the extracted embedded-assets cache directory
  * - For Node.js (dist/): returns __dirname (the dist/ directory)
  * - For tsx (src/): returns parent directory (the package root)
  */
@@ -372,8 +402,7 @@ export function getPackageDir(): string {
 	}
 
 	if (isBunBinary) {
-		// Bun binary: process.execPath points to the compiled executable
-		return dirname(process.execPath);
+		return getExtractedBunAssetsDir();
 	}
 	// Node.js: walk up from __dirname until we find package.json
 	let dir = __dirname;

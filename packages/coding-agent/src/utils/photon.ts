@@ -10,13 +10,14 @@
  *
  * Solution:
  * 1. Patch fs.readFileSync to redirect missing photon_rs_bg.wasm reads
- * 2. Copy photon_rs_bg.wasm next to the executable in build:binary
+ * 2. Embed photon_rs_bg.wasm in the compiled binary (see config.ts getPackageDir)
  */
 
 import type { PathOrFileDescriptor } from "fs";
 import { createRequire } from "module";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { getPackageDir } from "../config.ts";
 
 const require = createRequire(import.meta.url);
 const fs = require("fs") as typeof import("fs");
@@ -43,10 +44,10 @@ function pathOrNull(file: PathOrFileDescriptor): string | null {
 }
 
 function getFallbackWasmPaths(): string[] {
-	const execDir = path.dirname(process.execPath);
+	const packageDir = getPackageDir();
 	return [
-		path.join(execDir, WASM_FILENAME),
-		path.join(execDir, "photon", WASM_FILENAME),
+		path.join(packageDir, WASM_FILENAME),
+		path.join(packageDir, "photon", WASM_FILENAME),
 		path.join(process.cwd(), WASM_FILENAME),
 	];
 }
